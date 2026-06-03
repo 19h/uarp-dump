@@ -7,19 +7,24 @@ use serde_json::to_writer_pretty;
 
 mod uarp_parser;
 
-use uarp_parser::{build_manifest, parse_uarp_from_bytes, ValidationMode};
+use uarp_parser::{build_manifest, parse_uarp_from_bytes, tag_to_display, ValidationMode};
 
 /// Dump UARP "Super Binary" payloads.
 #[derive(Parser, Debug)]
-#[command(name = "uarp-dump", version = "1.1.0")]
-#[command(about = "UARP 'Super Binary' container dumper (stride-preamble aware)")]
+#[command(name = "uarp-dump", version)]
+#[command(about = "UARP 'Super Binary' container dumper (spec-verified)")]
 struct Cli {
     /// Path of the UARP file to process
     #[arg(value_name = "UARP_FILE", required = true)]
     uarp_file: PathBuf,
 
     /// Output directory (created if not exists)
-    #[arg(short = 'o', long = "outdir", value_name = "DIR", default_value = "uarp_dump")]
+    #[arg(
+        short = 'o',
+        long = "outdir",
+        value_name = "DIR",
+        default_value = "uarp_dump"
+    )]
     outdir: PathBuf,
 
     /// Overwrite into an existing directory without prompting
@@ -120,16 +125,16 @@ fn main() -> io::Result<()> {
         if cli.verbose {
             println!(
                 "{}: {} bytes (offset={}, length={})  v{}.{}.{}+{}  meta(off={}, len={})",
-                tag_to_string(&p.header.payload_tag),
+                tag_to_display(&p.header.payload_tag),
                 p.data.len(),
-                p.header.payload_data_offset,
-                p.header.payload_data_length,
+                p.header.payload_offset,
+                p.header.payload_length,
                 p.header.version_major,
                 p.header.version_minor,
                 p.header.version_release,
                 p.header.version_build,
-                p.header.payload_meta_offset,
-                p.header.payload_meta_length
+                p.header.payload_metadata_offset,
+                p.header.payload_metadata_length
             );
         }
 
@@ -163,37 +168,24 @@ fn is_empty_dir(p: &Path) -> io::Result<bool> {
     if !p.is_dir() {
         return Ok(false);
     }
-    for e in fs::read_dir(p)? {
-        let _ = e?;
-        return Ok(false);
+    match fs::read_dir(p)?.next() {
+        Some(entry) => {
+            entry?;
+            Ok(false)
+        }
+        None => Ok(true),
     }
-    Ok(true)
 }
 
 fn to_io<E: std::error::Error + Send + Sync + 'static>(e: E) -> io::Error {
-    io::Error::new(io::ErrorKind::Other, e)
-}
-
-fn tag_to_string(tag4: &[u8; 4]) -> String {
-    let ascii_ok = tag4.iter().all(|b| (0x20..=0x7E).contains(b));
-    if ascii_ok {
-        String::from_utf8_lossy(tag4).to_string()
-    } else {
-        format!("{:02X}{:02X}{:02X}{:02X}", tag4[0], tag4[1], tag4[2], tag4[3])
-    }
+    io::Error::other(e)
 }
 
 fn safe_tag_filename(tag4: &[u8; 4], index: usize) -> String {
-    let ascii_ok = tag4.iter().all(|b| (0x20..=0x7E).contains(b));
-    if ascii_ok {
-        if index == 0 {
-            String::from_utf8_lossy(tag4).to_string()
-        } else {
-            format!("{}_{index}", String::from_utf8_lossy(tag4))
-        }
-    } else if index == 0 {
-        format!("{:02X}{:02X}{:02X}{:02X}", tag4[0], tag4[1], tag4[2], tag4[3])
+    let base = tag_to_display(tag4);
+    if index == 0 {
+        base
     } else {
-        format!("{:02X}{:02X}{:02X}{:02X}_{index}", tag4[0], tag4[1], tag4[2], tag4[3])
+        format!("{base}_{index}")
     }
 }
